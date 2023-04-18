@@ -2,9 +2,8 @@
 import rospy
 from ros_clients.msg import GeneralizedForce
 from geometry_msgs.msg import TwistStamped
-import time
 class Tekne():
-    def __init__(self,force_publisher,Desired_velx,Desired_vely,Desired_velz,Kp,Ki,Kd,sample_time):
+    def __init__(self,force_publisher,Desired_velx,Desired_vely,Desired_velz,Kp,Ki,Kd):
         self.force_publisher=force_publisher
         self.force=GeneralizedForce()
         self.SetPoint_x=Desired_velx
@@ -13,12 +12,10 @@ class Tekne():
         self.Kp=Kp
         self.Ki=Ki
         self.Kd=Kd
-        self.sample=sample_time   
-        self.current_time=time.time()
-        self.last_time=self.current_time
-        self.clear()
-    def clear(self):
-        rospy.loginfo("bruak")
+        self.delta_time=0.1
+        self.x=0
+        self.y=0
+        self.z=0
         self.Pterm1=0.0
         self.Iterm1=0.0
         self.Dterm1=0.0
@@ -35,38 +32,33 @@ class Tekne():
         self.output1=0.0
         self.output2=0.0
         self.output3=0.0
-        self.delta_time=0.0
         self.error_x=0.0
         self.error_y=0.0
         self.error_z=0.0
         self.delta_error1=0.0
         self.delta_error2=0.0
         self.delta_error3=0.0
+        
+    def velocity_callback(self,a:TwistStamped):
+        self.x=a.twist.linear.x
+        self.y=a.twist.linear.y
+        self.z=a.twist.angular.z
+        
     def update(self):
         rate=rospy.Rate(10)
-        rospy.loginfo("deneme")
-        global x
-        global y
-        global z
         while not rospy.is_shutdown():
-            self.current_time=time.time()
-            self.delta_time=self.current_time-self.last_time
-            self.error_x=self.SetPoint_x-x
-            print("c")
-            self.error_y=self.SetPoint_y-y
-            self.error_z=self.Setpoint_z-z
-            print("b")
+            self.error_x=self.SetPoint_x-self.x
+            self.error_y=self.SetPoint_y-self.y
+            self.error_z=self.Setpoint_z-self.z
             self.delta_error1=self.error_x-self.lasterr1
             self.delta_error2=self.error_y-self.lasterr2
             self.delta_error3=self.error_z-self.lasterr3
-            
-            if (self.delta_time >= self.sample):
-                self.Pterm1 = self.Kp * self.error_x
-                self.Iterm1 += self.error_x * self.delta_time
-                self.Pterm2 = self.Kp * self.error_y
-                self.Iterm2+= self.error_y * self.delta_time
-                self.Pterm3 = self.Kp * self.error_z
-                self.Iterm3 += self.error_z * self.delta_time
+            self.Pterm1 = self.Kp * self.error_x
+            self.Iterm1 += self.error_x * self.delta_time
+            self.Pterm2 = self.Kp * self.error_y
+            self.Iterm2 += self.error_y * self.delta_time
+            self.Pterm3 = self.Kp * self.error_z
+            self.Iterm3 += self.error_z * self.delta_time
 
             # if (self.Iterm1 < -self.windup_guard):
             #     self.Iterm1 = -self.windup_guard
@@ -79,42 +71,32 @@ class Tekne():
             # if (self.Iterm3 < -self.windup_guard):
             #     self.Iterm3 = -self.windup_guard
             # elif (self.Iterm3 > self.windup_guard):
-            #     self.Iterm3 = self.windup_guard
-            self.Dterm1=0.0
-            self.Dterm2=0.0
-            self.Dterm3=0.0
-            if(self.delta_time>0):
-                self.Dterm1=self.delta_error1/self.delta_time
-                self.Dterm2=self.delta_error2/self.delta_time
-                self.Dterm3=self.delta_error3/self.delta_time
-            self.last_time=self.current_time
+            #     self.Iterm3 = self.windup_guard 
+            
+            self.Dterm1=self.delta_error1/self.delta_time
+            self.Dterm2=self.delta_error2/self.delta_time
+            self.Dterm3=self.delta_error3/self.delta_time
             self.lasterr1=self.error_x
             self.lasterr2=self.error_y
             self.lasterr3=self.error_z
             self.output1 = self.Pterm1 + (self.Ki * self.Iterm1) + (self.Kd * self.Dterm1)
             self.output2 = self.Pterm2 + (self.Ki * self.Iterm2) + (self.Kd * self.Dterm2)
-            self.output1 = self.Pterm3 + (self.Ki * self.Iterm3) + (self.Kd * self.Dterm3)
+            self.output3 = self.Pterm3 + (self.Ki * self.Iterm3) + (self.Kd * self.Dterm3)
+            print("output1:",self.output1)
+            print("output2:",self.output2)
+            print("output3:",self.output3)
             self.force.x=self.output1
             self.force.y=self.output2
             self.force.n=self.output3
             self.force_publisher.publish(self.force)
-            print(self.current_time)
             rate.sleep()
-def velocity_callback(a:TwistStamped):
-    global x
-    global y
-    global z
-    x=a.twist.linear.x
-    y=a.twist.linear.y
-    z=a.twist.angular.z
 
 if __name__=="__main__":
     try: 
         rospy.init_node("burak",anonymous=True)
-        velocity_subscriber=rospy.Subscriber("/nav/twist",TwistStamped,velocity_callback)
         force_publisher=rospy.Publisher("/force_control",GeneralizedForce,queue_size=10)
-        tekne=Tekne(force_publisher,1.0,1.0,1.0,100,100,100,0.0)
+        tekne=Tekne(force_publisher,1.0,1.0,1.0,1.0,1.0,1.0)
+        velocity_subscriber=rospy.Subscriber("/nav/twist",TwistStamped,tekne.velocity_callback)
         tekne.update()
-        time.sleep(2)
     except:
         pass
